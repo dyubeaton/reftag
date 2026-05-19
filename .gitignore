@@ -1,0 +1,33 @@
+# Go
+backend/bin/
+backend/*.exe
+*.test
+*.out
+
+# Python
+worker/.venv/
+worker/__pycache__/
+worker/**/__pycache__/
+worker/*.egg-info/
+worker/.pytest_cache/
+*.pyc
+
+# Docker
+.docker/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Env files (we'll add these later)
+.env
+.env.local
+
+# Dependencies (Go vendoring, if we ever use it)
+vendor/
+
+# Logs
+*.log
