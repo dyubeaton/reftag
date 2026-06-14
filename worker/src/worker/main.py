@@ -21,19 +21,19 @@ def main() -> None:
 
     # --- Connect to Redis ---
     host, port = redis_addr.split(":")
-    rdb = redis.Redis(host=host, port=int(port), decode_responses=True)
+    rdb = redis.Redis(host=host, port=int(port), decode_responses=True) #decode pong from bytes to str
 
-    # Retry the ping a few times — the worker may start before Redis is ready.
+    # Retry loop beyond the first connection in case a dependency goes down (don't assume dependencies eternally present)
     for attempt in range(1, 11):
         try:
             rdb.ping()
-            print("connected to redis", flush=True)
+            print("connected to redis", flush=True) # set flush to force each line out immediately 
             break
         except redis.ConnectionError:
             print(f"redis not ready (attempt {attempt}/10), retrying...", flush=True)
             time.sleep(2)
-    else:
-        print("FATAL: could not reach redis", file=sys.stderr)
+    else: 
+        print("FATAL: could not reach redis", file=sys.stderr) #runs if the loop completes without hitting break
         sys.exit(1)
 
     # --- Confirm the Go API is reachable ---
@@ -41,7 +41,7 @@ def main() -> None:
         resp = httpx.get(f"{backend_url}/health", timeout=5.0)
         print(f"backend /health responded: {resp.status_code}", flush=True)
     except httpx.HTTPError as e:
-        print(f"WARNING: could not reach backend: {e}", flush=True)
+        print(f"WARNING: could not reach backend: {e}", flush=True) # soft dependency
 
     # --- Idle loop (real job processing comes next step) ---
     print("worker started, waiting for jobs...", flush=True)
