@@ -71,6 +71,9 @@ func main() {
 	addr := ":8080"
 	log.Printf("starting server on %s", addr)
 
+	go a.consumeResults(ctx)
+	log.Println("result consumer started")
+
 	if err := http.ListenAndServe(addr, r); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
@@ -135,4 +138,42 @@ func (a *app) handleEnqueue(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{"job_id": id})
+}
+
+// consumeResults runs in a goroutine, continuously reading the results stream.
+func (a *app) consumeResults(ctx context.Context) {
+	consumerName := "backend-1"
+
+	for {
+		// Block up to 5s waiting for new entries. ">" means "undelivered
+		// messages for this group" (not previously handed to any consumer).
+		streams, err := a.redis.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group:    queue.BackendGroup,
+			Consumer: consumerName,
+			Streams:  []string{queue.ResultsStream, ">"},
+			Count:    10,
+			Block:    5 * time.Second,
+		}).Result()
+
+		if err != nil {
+			// redis.Nil means the 5s block elapsed with no new messages — normal.
+			if err == redis.Nil {
+				continue
+			}
+			log.Printf("error reading results: %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		for _, stream := range streams {
+			for _, msg := range stream.Messages {
+				log.Printf("received result %s: %v", msg.ID, msg.Values)
+
+				// Acknowledge — tell Redis we've processed this entry.
+				if err := a.redis.XAck(ctx, queue.ResultsStream, queue.BackendGroup, msg.ID).Err(); err != nil {
+					log.Printf("failed to ack %s: %v", msg.ID, err)
+				}
+			}
+		}
+	}
 }
