@@ -103,3 +103,14 @@ func (a *app) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(resp)
 }
+
+// ensureGroup creates a consumer group on a stream if it doesn't already exist.
+// MKSTREAM creates the stream too if needed. "$" means "start reading from new
+// messages only" (ignore any pre-existing backlog).
+func ensureGroup(ctx context.Context, rdb *redis.Client, stream, group string) error {
+	err := rdb.XGroupCreateMkStream(ctx, stream, group, "$").Err()
+	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+		return err
+	}
+	return nil
+}
