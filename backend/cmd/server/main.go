@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/dyubeaton/reftag/backend/internal/queue"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -65,6 +66,7 @@ func main() {
 	r.Use(middleware.Recoverer) //catches panics
 
 	r.Get("/health", a.handleHealth)
+	r.Post("/api/debug/enqueue", a.handleEnqueue)
 
 	addr := ":8080"
 	log.Printf("starting server on %s", addr)
@@ -113,4 +115,24 @@ func ensureGroup(ctx context.Context, rdb *redis.Client, stream, group string) e
 		return err
 	}
 	return nil
+}
+
+// handleEnqueue pushes a dummy job onto the jobs stream.
+func (a *app) handleEnqueue(w http.ResponseWriter, r *http.Request) {
+	id, err := a.redis.XAdd(r.Context(), &redis.XAddArgs{
+		Stream: queue.JobsStream,
+		Values: map[string]interface{}{
+			"image_id": "1",
+			"note":     "dummy job from enqueue endpoint",
+		},
+	}).Result()
+	if err != nil {
+		http.Error(w, "failed to enqueue: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("enqueued job %s", id)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]string{"job_id": id})
 }
