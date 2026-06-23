@@ -43,11 +43,50 @@ def main() -> None:
     except httpx.HTTPError as e:
         print(f"WARNING: could not reach backend: {e}", flush=True) # soft dependency
 
-    # --- Idle loop (real job processing comes next step) ---
+    # --- Ensure our consumer group exists on the jobs stream ---
+    try:
+        rdb.xgroup_create(name="jobs", groupname="workers", id="$", mkstream=True)
+        print("created jobs consumer group", flush=True)
+    except redis.ResponseError as e:
+        if "BUSYGROUP" in str(e):
+            print("jobs consumer group already exists", flush=True)
+        else:
+            raise
+
     print("worker started, waiting for jobs...", flush=True)
+
+    consumer_name = "worker-1"
     while True:
-        time.sleep(5)
-        print("worker heartbeat (no jobs yet)", flush=True)
+        # Block up to 5s waiting for undelivered jobs (">").
+        resp = rdb.xreadgroup(
+            groupname="workers",
+            consumername=consumer_name,
+            streams={"jobs": ">"},
+            count=10,
+            block=5000,  # milliseconds
+        )
+
+        if not resp:
+            continue  # timed out with no new jobs — normal
+
+        for stream_name, messages in resp:
+            for msg_id, fields in messages:
+                print(f"processing job {msg_id}: {fields}", flush=True)
+
+                # --- Dummy "work" ---
+                # Real version: query Go API for tags, run CLIP, etc.
+                result = {
+                    "job_id": msg_id,
+                    "image_id": fields.get("image_id", "unknown"),
+                    "suggested_tags": "hand,pose",  # hardcoded for the skeleton
+                }
+
+                # Produce a result onto the results stream.
+                rdb.xadd("results", result)
+                print(f"produced result for job {msg_id}", flush=True)
+
+                # Acknowledge the original job.
+                rdb.xack("jobs", "workers", msg_id)
 
 
 if __name__ == "__main__":
