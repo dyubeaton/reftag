@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dyubeaton/reftag/backend/internal/queue"
@@ -54,6 +55,11 @@ func main() {
 		log.Fatalf("unable to reach redis: %v", err)
 	}
 	log.Println("connected to redis")
+
+	if err := ensureGroup(ctx, rdb, queue.ResultsStream, queue.BackendGroup); err != nil {
+		log.Fatalf("failed to create results consumer group: %v", err)
+	}
+	log.Println("results consumer group ready")
 
 	// Wire up dependencies and routes
 	a := &app{db: pool, redis: rdb}
@@ -158,6 +164,16 @@ func (a *app) consumeResults(ctx context.Context) {
 		if err != nil {
 			// redis.Nil means the 5s block elapsed with no new messages — normal.
 			if err == redis.Nil {
+				continue
+			}
+			// NOGROUP: the stream or group vanished (e.g. Redis restarted).
+			// Recreate it and retry rather than erroring forever.
+			if strings.Contains(err.Error(), "NOGROUP") {
+				log.Println("results group missing, recreating...")
+				if cerr := ensureGroup(ctx, a.redis, queue.ResultsStream, queue.BackendGroup); cerr != nil {
+					log.Printf("failed to recreate results group: %v", cerr)
+					time.Sleep(1 * time.Second)
+				}
 				continue
 			}
 			log.Printf("error reading results: %v", err)
